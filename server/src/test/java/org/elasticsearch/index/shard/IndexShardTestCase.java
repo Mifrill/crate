@@ -240,6 +240,25 @@ public abstract class IndexShardTestCase extends ESTestCase {
         shard.mapperService().merge(indexMetadata, MapperService.MergeReason.MAPPING_UPDATE);
     }
 
+    protected Engine.DeleteResult deleteDoc(IndexShard shard, String id) throws IOException {
+        Engine.DeleteResult result;
+        if (shard.routingEntry().primary()) {
+            result = shard.applyDeleteOperationOnPrimary(
+                Versions.MATCH_ANY, id, VersionType.INTERNAL, SequenceNumbers.UNASSIGNED_SEQ_NO, 0);
+            shard.sync(); // advance local checkpoint
+            shard.updateLocalCheckpointForShard(
+                shard.routingEntry().allocationId().getId(),
+                shard.getLocalCheckpoint()
+            );
+        } else {
+            long seqNo = shard.seqNoStats().getMaxSeqNo() + 1;
+            shard.advanceMaxSeqNoOfUpdatesOrDeletes(seqNo); // manually replicate max_seq_no_of_updates
+            result = shard.applyDeleteOperationOnReplica(seqNo, 0L, id);
+            shard.sync(); // advance local checkpoint
+        }
+        return result;
+    }
+
     protected void flushShard(IndexShard shard) {
         flushShard(shard, false);
     }
